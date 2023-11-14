@@ -36,6 +36,7 @@ type ResultData struct {
 type ReadFrameResult struct {
 	ResultData
 	Err int
+	Conn int
 }
 
 type ReadFrameSummary struct {
@@ -105,7 +106,7 @@ func main() {
 	ch := make(chan ReadFrameResult, *connections)
 	for i := 0; i < *connections; i++ {
 		log.Printf("create connection %d", i)
-		go execute(serverUrl, conf, ch)
+		go execute(serverUrl, conf, ch, i)
 	}
 
 	var summary ReadFrameSummary
@@ -113,10 +114,16 @@ func main() {
 		log.Printf("%v", rfr)
 		summary.Add(rfr)
 	}
-	summarize(summary)
+	summarize(ch)
 }
 
-func summarize(summary ReadFrameSummary) {
+func summarize(ch <-chan ReadFrameResult) {
+	var summary ReadFrameSummary
+
+	for rfr := range ch {
+		printResult(rfr)
+		summary.Add(rfr)
+	}
 	fmt.Println(strings.Repeat("#", 20) + "SUMMARY" + strings.Repeat("#", 20))
 	fmt.Println("Packet types received:")
 	fmt.Printf("\t PING: %d\n", summary.Ping)
@@ -133,7 +140,32 @@ func summarize(summary ReadFrameSummary) {
 	fmt.Printf("\t Error events: %d\n", summary.ErrorEvents)
 }
 
-func execute(serverUrl *url.URL, conf *tls.Config, ch chan<- ReadFrameResult) {
+func printResult(result ReadFrameResult) {
+	fmt.Printf("Summary for connection %d", result.Conn)
+	fmt.Printf("\t PING: %d\n", result.Ping)
+	fmt.Printf("\t HEADERS: %d\n", result.Headers)
+	fmt.Printf("\t SETTINGS: %d\n", result.Settings)
+	fmt.Printf("\t DATA: %d\n", result.Data)
+	fmt.Printf("\t GOAWAY: %d\n", result.GoAway)
+	fmt.Printf("\t RSTSTREAM: %d\n", result.RSTStream)
+	fmt.Printf("\t WINDOWUPDATE: %d\n", result.WindowUpdate)
+	fmt.Printf("\t UNKNOWN: %d\n", result.Unknown)
+	
+	var reason string
+	switch result.Err {
+	case 0:
+		reason = "Timed out"
+	case 1:
+		reason = "GoAway - the server responded as expected."
+	case 2:
+		reason = "Error - we found some kind of error while evaluating the received packets"
+	default:
+		reason = "Unexpected result"
+	}
+	fmt.Printf("Reason for stopping to listen for more packets: %s", reason)
+}
+
+func execute(serverUrl *url.URL, conf *tls.Config, ch chan<- ReadFrameResult, connId int) {
 	conn, err := tls.Dial("tcp", serverUrl.Host, conf)
 	if err != nil {
 		log.Fatalf("error establishing connection to %s: %v", serverUrl.Host, err)
@@ -176,14 +208,16 @@ func execute(serverUrl *url.URL, conf *tls.Config, ch chan<- ReadFrameResult) {
 		streamFramer := http2.NewFramer(conn, conn) //a framer may only be used by a single reader/writer
 		go attack(streamFramer, serverUrl, &streamCounter)
 	}
-	ch <- readFrames(conn)
+	ch <- readFrames(conn, connId)
 
 	conn.Close()
 }
 
-func readFrames(conn *tls.Conn) ReadFrameResult {
+func readFrames(conn *tls.Conn, connId int) ReadFrameResult {
 	framer := http2.NewFramer(conn, conn) //a framer is fairly lightweight and we don't want to interfere with write operations, so let's read frames on a separate one.
-	var rfr ReadFrameResult
+	var rfr ReadFrameResult = ReadFrameResult{
+		Conn: connId,
+	}
 
 	readDuration := time.Duration(10) * time.Second
 	for {
