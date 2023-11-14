@@ -17,7 +17,7 @@ import (
 
 const PREFACE = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
 const (
-	TIMEOUT = iota
+	UNKNOWN = iota
 	GOAWAY
 	ERR
 )
@@ -149,11 +149,11 @@ func printResult(result ReadFrameResult) {
 
 	var reason string
 	switch result.Err {
-	case 0:
-		reason = "Timed out"
-	case 1:
+	case UNKNOWN:
+		reason = "Unknown"
+	case GOAWAY:
 		reason = "GoAway - the server responded as expected."
-	case 2:
+	case ERR:
 		reason = "Error - we found some kind of error while evaluating the received packets"
 	default:
 		reason = "Unexpected result"
@@ -221,7 +221,9 @@ func readFrames(conn *tls.Conn, connId int) ReadFrameResult {
 		frame, err := framer.ReadFrame()
 		if err != nil {
 			log.Printf("error reading response frame: %v", err)
-			rfr.Err = ERR
+			if rfr.Err == UNKNOWN {
+				rfr.Err = ERR
+			}
 			return rfr
 		}
 		log.Printf("found new frame headers: %v", frame.Header())
@@ -235,8 +237,8 @@ func readFrames(conn *tls.Conn, connId int) ReadFrameResult {
 			rfr.Data++
 		case http2.FrameGoAway:
 			rfr.GoAway++
+			rfr.Err = GOAWAY
 			if !*ignoreGoAway {
-				rfr.Err = GOAWAY
 				return rfr
 			}
 		case http2.FramePing:
