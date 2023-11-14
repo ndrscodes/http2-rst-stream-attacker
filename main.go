@@ -45,6 +45,24 @@ type ReadFrameSummary struct {
 	ErrorEvents   uint32
 }
 
+func (rfs *ReadFrameSummary) Add(rfr ReadFrameResult) {
+	var errs [3]uint32
+	errs[rfr.Err] = 1
+
+	rfs.Data += rfr.Data
+	rfs.GoAway += rfr.GoAway
+	rfs.Ping += rfr.Ping
+	rfs.Unknown += rfr.Unknown
+	rfs.Headers += rfr.Headers
+	rfs.WindowUpdate += rfr.WindowUpdate
+	rfs.Settings += rfr.Settings
+	rfs.RSTStream += rfr.RSTStream
+	
+	rfs.TimeoutEvents = errs[0] + rfs.TimeoutEvents
+	rfs.GoAwayEvents = errs[1] + rfs.GoAwayEvents
+	rfs.ErrorEvents = errs[2] + rfs.ErrorEvents
+}
+
 var attempts = flag.Uint("attempts", 1, "maximum attempts per routine")
 var sleep = flag.Int("delay", 1, "delay between sending HEADERS and RST_STREAM frames")
 var ignoreGoAway = flag.Bool("ignoreGoAway", false, "ignore GOAWAY frames sent by the server")
@@ -93,7 +111,7 @@ func main() {
 	var summary ReadFrameSummary
 	for rfr := range ch {
 		log.Printf("%v", rfr)
-		summary = sum(rfr, summary)
+		summary.Add(rfr)
 	}
 	summarize(summary)
 }
@@ -113,27 +131,6 @@ func summarize(summary ReadFrameSummary) {
 	fmt.Printf("\t GoAway events: %d\n", summary.GoAwayEvents)
 	fmt.Printf("\t Timeout events: %d\n", summary.TimeoutEvents)
 	fmt.Printf("\t Error events: %d\n", summary.ErrorEvents)
-}
-
-func sum(result ReadFrameResult, summary ReadFrameSummary) ReadFrameSummary {
-	var errs [3]uint32
-	errs[result.Err] = 1
-
-	return ReadFrameSummary{
-			ResultData: ResultData {
-			Data:          result.Data + summary.Data,
-			GoAway:        result.GoAway + summary.GoAway,
-			Ping:          result.Ping + summary.Ping,
-			Unknown:       result.Unknown + summary.Unknown,
-			Headers:       result.Headers + summary.Headers,
-			WindowUpdate:  result.WindowUpdate + summary.WindowUpdate,
-			Settings:      result.Settings + summary.Settings,
-			RSTStream:     result.RSTStream + summary.RSTStream,
-		},
-		TimeoutEvents: errs[0] + summary.TimeoutEvents,
-		GoAwayEvents:  errs[1] + summary.GoAwayEvents,
-		ErrorEvents:   errs[2] + summary.ErrorEvents,
-	}
 }
 
 func execute(serverUrl *url.URL, conf *tls.Config, ch chan<- ReadFrameResult) {
