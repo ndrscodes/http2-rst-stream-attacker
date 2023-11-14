@@ -35,7 +35,7 @@ type ResultData struct {
 
 type ReadFrameResult struct {
 	ResultData
-	Err int
+	Err  int
 	Conn int
 }
 
@@ -58,7 +58,7 @@ func (rfs *ReadFrameSummary) Add(rfr ReadFrameResult) {
 	rfs.WindowUpdate += rfr.WindowUpdate
 	rfs.Settings += rfr.Settings
 	rfs.RSTStream += rfr.RSTStream
-	
+
 	rfs.TimeoutEvents = errs[0] + rfs.TimeoutEvents
 	rfs.GoAwayEvents = errs[1] + rfs.GoAwayEvents
 	rfs.ErrorEvents = errs[2] + rfs.ErrorEvents
@@ -150,7 +150,7 @@ func printResult(result ReadFrameResult) {
 	fmt.Printf("\t RSTSTREAM: %d\n", result.RSTStream)
 	fmt.Printf("\t WINDOWUPDATE: %d\n", result.WindowUpdate)
 	fmt.Printf("\t UNKNOWN: %d\n", result.Unknown)
-	
+
 	var reason string
 	switch result.Err {
 	case 0:
