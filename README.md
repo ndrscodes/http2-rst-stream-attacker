@@ -3,8 +3,10 @@
 ## CVE-2023-44487
 
 CVE-2023-44487 is an exploit against the HTTP2 protocol itself. In HTTP2, requests for data are initiated by sending a HEADERS frame. After receiving this frame, a server will start processing your request,
-subsequently sending DATA frames until all data is transmitted. HTTP2 also specified a RST_STREAM frame, which can be used to close a stream at any point.
-This can be exploited: If an attacker rapidly a HEADERS frame followed by RST_STREAM frames, the server still has to load and send all the data.
+subsequently sending DATA frames until all data is transmitted. HTTP2 also specified a RST_STREAM frame, which can be used to close a stream at any point. To prevent attacks,
+servers usually limit the maximum amount of concurrently opened streams (to 100 by default). If clients actually wait for all resources to be consumed, this limit is rarely hit.
+The attack works for a simple reason: A client can send a RST_STREAM frame at *any* point. A RST_STREAM frame closes a stream, and closed streams are not counted as a concurrent stream. This means that
+a client can send requests rapidly, without ever hitting this limit, simply by closing a connection directly after sending a request. The server being attacked will, in some cases, still start loading the data, creating excessive load.
 
 This tool aims to check a server's vulnerability to this attack. It establishes one or more concurrent HTTP2 connections and subsequently sends the specified numbers of HEADER frames, followed by RST_STREAM frames.
 
