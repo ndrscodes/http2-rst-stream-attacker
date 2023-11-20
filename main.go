@@ -75,6 +75,9 @@ var serverUrl = flag.String("url", "https://localhost:443/", "the server to atta
 var skipVerify = flag.Bool("skipValidation", true, "skip certificate verifcation")
 var routines = flag.Int("routines", 1, "number of concurrent streams to attack")
 var connections = flag.Int("connections", 1, "number of connections to open")
+var monitorDelay = flag.Int("monitorDelay", 100, "delay between connection monitoring attempts")
+var monitoringEnabled = flag.Bool("monitor", false, "enable performance monitoring")
+var monitorLogPath = flag.String("monitorLog", "monitor.log", "path to performance monitor logfile")
 
 func createHeaderFrameParam(url *url.URL, streamId uint32) http2.HeadersFrameParam {
 	var headerBlock bytes.Buffer
@@ -104,15 +107,13 @@ func monitor(client *http.Client) (measurement time.Duration, err error) {
 	end := time.Now()
 	measurement = end.Sub(start)
 	
-	time.Sleep(time.Duration(1) * time.Second)
-
 	log.Printf("HEAD request took %v", measurement)
 
 	return measurement, err
 }
 
 func monitorPerformance(ch chan <- time.Duration, doneFlag *bool) {
-	f, err := os.Create("monitor.log")
+	f, err := os.Create(*monitorLogPath)
 	if err != nil {
 		log.Fatalf("failed opening logfile: %v", err)
 	}
@@ -127,8 +128,9 @@ func monitorPerformance(ch chan <- time.Duration, doneFlag *bool) {
 	avg := 0.0
 	var total int64
 	var i int64 = 1
+	timeout := time.Duration(*monitorDelay) * time.Millisecond
 	for !*doneFlag {
-		time.Sleep(time.Millisecond * time.Duration(500))
+		time.Sleep(timeout)
 		val, err := monitor(client)
 		if err != nil {
 			log.Printf("ERROR DURING MONITORING: %v", err)
@@ -158,7 +160,9 @@ func main() {
 	done := false
 
 	monitorCh := make(chan time.Duration)
-	go monitorPerformance(monitorCh, &done)
+	if *monitoringEnabled {
+		go monitorPerformance(monitorCh, &done)
+	}
 
 	ch := make(chan ReadFrameResult, *connections)
 	wg := &sync.WaitGroup{}
@@ -170,9 +174,11 @@ func main() {
 
 	wg.Wait()
 	done = true
-	
-	avg := <- monitorCh
-	log.Printf("average HTTP/1 response time: %v", avg)
+
+	if *monitoringEnabled {
+		avg := <- monitorCh
+		log.Printf("average HTTP/1 response time: %v", avg)
+	}
 	summarize(ch)
 }
 
