@@ -324,7 +324,7 @@ func attack(framer *http2.Framer, url *url.URL, streamCounter *atomic.Uint32) {
 		streamCounter.Add(2)
 		err := framer.WriteHeaders(createHeaderFrameParam(url, streamId))
 		if err != nil {
-			log.Println("[stream %d] unable to send initial HEADERS frame", streamId)
+			log.Printf("[stream %d] unable to send initial HEADERS frame", streamId)
 			return
 		}
 		log.Printf("[stream %d] sent initial headers", streamId)
