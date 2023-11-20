@@ -50,18 +50,28 @@ type ReadFrameSummary struct {
 	ErrorEvents   uint32
 }
 
+func (rd *ResultData) Add(data ResultData) {
+	rd.Headers += data.Headers
+	rd.GoAway += data.GoAway
+	rd.Data += data.Data
+	rd.Settings += data.Settings
+	rd.WindowUpdate += data.WindowUpdate
+	rd.Ping += data.Ping
+	rd.Unknown += data.Unknown
+	rd.RSTStream += data.RSTStream
+}
+
+func (rfr *ReadFrameResult) Add(result ReadFrameResult) {
+	rfr.ResultData.Add(result.ResultData)
+	if result.Err != UNKNOWN {
+		rfr.Err = result.Err
+	}
+}
+
 func (rfs *ReadFrameSummary) Add(rfr ReadFrameResult) {
 	var errs [3]uint32
 	errs[rfr.Err] = 1
-
-	rfs.Data += rfr.Data
-	rfs.GoAway += rfr.GoAway
-	rfs.Ping += rfr.Ping
-	rfs.Unknown += rfr.Unknown
-	rfs.Headers += rfr.Headers
-	rfs.WindowUpdate += rfr.WindowUpdate
-	rfs.Settings += rfr.Settings
-	rfs.RSTStream += rfr.RSTStream
+	rfs.ResultData.Add(rfr.ResultData)
 
 	rfs.TimeoutEvents = errs[0] + rfs.TimeoutEvents
 	rfs.GoAwayEvents = errs[1] + rfs.GoAwayEvents
@@ -74,10 +84,11 @@ var ignoreGoAway = flag.Bool("ignoreGoAway", false, "ignore GOAWAY frames sent b
 var serverUrl = flag.String("url", "https://localhost:443/", "the server to attack")
 var skipVerify = flag.Bool("skipValidation", true, "skip certificate verifcation")
 var routines = flag.Int("routines", 1, "number of concurrent streams to attack")
-var connections = flag.Int("connections", 1, "number of connections to open")
+var connections = flag.Int("connections", 1, "number of consecutive connections to open")
 var monitorDelay = flag.Int("monitorDelay", 100, "delay between connection monitoring attempts")
 var monitoringEnabled = flag.Bool("monitor", false, "enable performance monitoring")
 var monitorLogPath = flag.String("monitorLog", "monitor.log", "path to performance monitor logfile")
+var connectAttempts = flag.Int("connectAttempts", 1, "number of consecutive connections to run the test on (per connect-routine)")
 
 func createHeaderFrameParam(url *url.URL, streamId uint32) http2.HeadersFrameParam {
 	var headerBlock bytes.Buffer
@@ -231,7 +242,7 @@ func printResult(result ReadFrameResult) {
 	fmt.Printf("\tReason for stopping to listen for more packets: %s\n", reason)
 }
 
-func execute(serverUrl *url.URL, conf *tls.Config, ch chan<- ReadFrameResult, connId int, wg *sync.WaitGroup) {
+func connectAndAttack(serverUrl *url.URL, conf *tls.Config, connId int) ReadFrameResult {
 	conn, err := tls.Dial("tcp", serverUrl.Host, conf)
 	if err != nil {
 		log.Fatalf("error establishing connection to %s: %v", serverUrl.Host, err)
@@ -274,9 +285,19 @@ func execute(serverUrl *url.URL, conf *tls.Config, ch chan<- ReadFrameResult, co
 		streamFramer := http2.NewFramer(conn, conn) //a framer may only be used by a single reader/writer
 		go attack(streamFramer, serverUrl, &streamCounter)
 	}
-	ch <- readFrames(conn, connId)
 
+	res := readFrames(conn, connId)
 	conn.Close()
+	return res
+}
+
+func execute(serverUrl *url.URL, conf *tls.Config, ch chan<- ReadFrameResult, connId int, wg *sync.WaitGroup) {
+	var res ReadFrameResult
+	for i := 0; i < *connectAttempts; i++ {
+		r := connectAndAttack(serverUrl, conf, connId)
+		res.Add(r)
+	}
+	ch <- res
 	wg.Done()
 }
 
