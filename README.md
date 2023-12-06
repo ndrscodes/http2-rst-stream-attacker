@@ -17,19 +17,25 @@ This can assist you in identifying if your services are vulnerable to CVE-2023-4
 ## Running
 
 As of now, this tool is distributed as source code only, meaning a go install is required. The tool can be executed by running `go run main.go <options>`
+There is also a python script which can be used to plot latency information written to the `monitor.log` file.
 
 ## CLI Flags
 
 Currently, the following CLI options are implemented:
-| Flag           | Default                | Meaning                                                                                                                                                     |
-|----------------|------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| attempts       | 1                      | the number of HEADERS and RST_STREAM frames to send on any stream                                                                                           |
-| connections    | 1                      | the number of TLS connections to run the attack on (concurrently)                                                                                           |
-| delay          | 0                      | the time (in ms) to wait between sending HEADERS and RST_STREAM frames                                                                                      |
-| ignoreGoAway   | false                  | if true, GOAWAY streams will not cause the receiving routine to terminate. Instead, it will wait until no frame has been received for more than 10 seconds. |
-| routines       | 1                      | the number of streams to attack                                                                                                                             |
-| skipValidation | true                   | if true, the server certificate will not be validated (this is the default - we don't care about security since we are the attacker anyways)                |
-| url            | https://localhost:433/ | the url to run the attack against                                                                                                                           |
+| Flag             | Default                | Meaning                                                                                                                                                     |
+|------------------|------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| frames           | 1                      | the number of HEADERS and RST_STREAM frames to send on any stream                                                                                           |
+| connections      | 1                      | the number of TLS connections to run the attack on (concurrently)                                                                                           |
+| consecutiveSends | 1                      | number of HEADERS frames to send before sending RST_STREAM frames (per flow)                                                                                |
+| connectAttempts  | 1                      | number of consecutive connections to run the test on (per connect-routine)                                                                                  |
+| delay            | 0                      | the time (in ms) to wait between sending HEADERS and RST_STREAM frames                                                                                      |
+| ignoreGoAway     | false                  | if true, GOAWAY streams will not cause the receiving routine to terminate. Instead, it will wait until no frame has been received for more than 10 seconds. |
+| monitor          | false                  | enable performance monitoring                                                                                                                               |
+| monitorDelay     | 100                    | the time (in ms) to wait between testing response latency                                                                                                   |
+| monitorLog       | ./monitor.log          | to file to write monitor delay logs                                                                                                                         |
+| routines         | 1                      | the number of streams to attack                                                                                                                             |
+| skipValidation   | true                   | if true, the server certificate will not be validated (this is the default - we don't care about security since we are the attacker anyways)                |
+| url              | https://localhost:433/ | the url to run the attack against
 
 ## Example output
 
