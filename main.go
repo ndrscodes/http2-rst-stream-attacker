@@ -79,7 +79,7 @@ func (rfs *ReadFrameSummary) Add(rfr ReadFrameResult) {
 	rfs.ErrorEvents = errs[2] + rfs.ErrorEvents
 }
 
-var flows = flag.Uint("frames", 1, "maximum attempts per routine")
+var flows = flag.Uint("frames", 1, "maximum flows per routine")
 var sleep = flag.Uint("delay", 1, "delay between sending HEADERS and RST_STREAM frames")
 var ignoreGoAway = flag.Bool("ignoreGoAway", false, "ignore GOAWAY frames sent by the server")
 var serverUrl = flag.String("url", "https://localhost:443/", "the server to attack")
@@ -90,7 +90,7 @@ var monitorDelay = flag.Uint("monitorDelay", 100, "delay between connection moni
 var monitoringEnabled = flag.Bool("monitor", false, "enable performance monitoring")
 var monitorLogPath = flag.String("monitorLog", "monitor.log", "path to performance monitor logfile")
 var connectAttempts = flag.Uint("connectAttempts", 1, "number of consecutive connections to run the test on (per connect-routine)")
-var consecutiveSends = flag.Uint("consecutiveSends", 1, "number of HEADERS frames to send before sending RST_STREAM frames (per attempt)")
+var consecutiveSends = flag.Uint("consecutiveSends", 1, "number of HEADERS frames to send before sending RST_STREAM frames (per flow)")
 
 func createHeaderFrameParam(url *url.URL, streamId uint32) http2.HeadersFrameParam {
 	var headerBlock bytes.Buffer
