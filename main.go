@@ -102,6 +102,7 @@ func createHeaderFrameParam(url *url.URL, streamId uint32) http2.HeadersFramePar
 	encoder.WriteField(hpack.HeaderField{Name: ":path", Value: url.Path})
 	encoder.WriteField(hpack.HeaderField{Name: ":scheme", Value: "https"})
 	encoder.WriteField(hpack.HeaderField{Name: ":authority", Value: url.Host})
+	log.Printf("path: %s\nHost: %s", url.Path, url.Host)
 
 	return http2.HeadersFrameParam{
 		StreamID:      streamId,
@@ -185,9 +186,12 @@ func main() {
 	if *monitoringEnabled {
 		go monitorPerformance(monitorCh, &done)
 	}
-	time.Sleep(time.Duration(3) * time.Second)
 	ch := make(chan ReadFrameResult, *connections)
 	wg := &sync.WaitGroup{}
+	if len(serverUrl.Path) == 0 {
+		serverUrl.Path = "/"
+	}
+
 	for i := uint(0); i < *connections; i++ {
 		log.Printf("create connection %d", i)
 		wg.Add(1)
@@ -195,7 +199,6 @@ func main() {
 	}
 
 	wg.Wait()
-	time.Sleep(time.Duration(3) * time.Second)
 	done = true
 
 	if *monitoringEnabled {
