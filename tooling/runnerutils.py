@@ -23,15 +23,16 @@ class CancellationToken:
         self.cancelled = True
 
 class Stats:
-    def __init__(self, median: float, mean: float, stdev: float, minimum: float, maximum: float):
+    def __init__(self, median: float, mean: float, stdev: float, minimum: float, maximum: float, name: str=None):
         self.median = median
         self.mean = mean
         self.stdev = stdev
         self.minimum = minimum
         self.maximum = maximum
+        self.name = name
     
     def score(self):
         return self.median + self.mean
 
     def __str__(self):
-        return f"median: {self.median}\nmean: {self.mean}\nstandard deviation: {self.stdev}\nmin: {self.minimum}\nmax: {self.maximum}\n"
+        return f"Stats type: {self.name}\nmedian: {self.median}\nmean: {self.mean}\nstandard deviation: {self.stdev}\nmin: {self.minimum}\nmax: {self.maximum}\n"

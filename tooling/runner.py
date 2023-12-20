@@ -36,7 +36,7 @@ def create_stats(path: str, name: str, data: list[tuple[int | float, datetime]])
     pyplot.savefig(f"{path}/{name}_plot.png", format="png")
     pyplot.close()
 
-    stats = runnerutils.Stats(median, mean, stdev, min_val, max_val)
+    stats = runnerutils.Stats(median, mean, stdev, min_val, max_val, name)
 
     with open(f"{path}/{name}.txt", "a") as stat_file:
         stat_file.write(str(stats))
@@ -104,9 +104,6 @@ def measure_baseline(client: httpx.Client, url: str, path: str):
 
         return stats
 
-def deep_str(obj: list[...]) -> list[str]:
-    return [str(o) for o in obj]
-
 def cooldown(timeout: int=120):
     print(f"now cooling down for {timeout} seconds")
     time.sleep(timeout)
@@ -146,6 +143,10 @@ def measure_attack(client: httpx.Client, args: runnerutils.Params, path: str):
 
         return stats
 
+def stats_to_str(stats: list[runnerutils.Stats]):
+    stats = [s.__str__() for s in stats]
+    return "\n".join(stats)
+
 arg_scores = []
 
 for server in servers:
@@ -161,7 +162,7 @@ for server in servers:
         url = args[0][1].url
         print(f"now measuring baseline for url {url}")
         stats = measure_baseline(client, url, path)
-        print(f"finished baseline measurement. Stats:\n{deep_str(stats)}")
+        print(f"finished baseline measurement. Stats:\n{stats_to_str(stats)}")
 
     cooldown()
 
@@ -173,7 +174,7 @@ for server in servers:
         with httpx.Client(http2=True, verify=False) as client:
             stats = measure_attack(client, a, path)
             arg_scores.append((a, stats[2].score()))
-            print(f"finished attack. Stats:\n{deep_str(stats)}")
+            print(f"finished attack. Stats:\n{stats_to_str(stats)}")
 
         cooldown() 
     
@@ -192,7 +193,7 @@ for server in servers:
         os.makedirs(path)
         with httpx.Client(http2=True, verify=False) as client:
             stats = measure_attack(client, best, path)
-            print(f"finished attack. Stats:\n{deep_str(stats)}")
+            print(f"finished attack. Stats:\n{stats_to_str(stats)}")
         
         cooldown()
 
