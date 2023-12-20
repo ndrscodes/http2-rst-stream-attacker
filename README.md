@@ -35,7 +35,8 @@ Currently, the following CLI options are implemented:
 | monitorLog       | ./monitor.log          | to file to write monitor delay logs                                                                                                                         |
 | routines         | 1                      | the number of streams to attack                                                                                                                             |
 | skipValidation   | true                   | if true, the server certificate will not be validated (this is the default - we don't care about security since we are the attacker anyways)                |
-| url              | https://localhost:433/ | the url to run the attack against
+| timeout          | 1000                   | time to wait for new frames before considering the connection attempt as invalid and stopping it                                                            |
+| url              | https://localhost:433/ | the url to run the attack against                                                                                                                           |
 
 ## Example output
 
