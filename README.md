@@ -19,6 +19,14 @@ This can assist you in identifying if your services are vulnerable to CVE-2023-4
 As of now, this tool is distributed as source code only, meaning a go install is required. The tool can be executed by running `go run main.go <options>`
 There is also a python script which can be used to plot latency information written to the `monitor.log` file.
 
+## Tooling
+
+In addition, i created a new python tooling for more accurate and extensive measurements.
+The `runner.py` file located in the `tooling` folder will read the values defined in your `config.py` (see `config-sample.py` for details) and run all tests for all defined docker containers.
+It will then run the most successful test (highest median + mean latency) for all paths defined in the `paths` array. It will output plots and log files for each test that's been run.
+This tooling is still under development. I only created it because I was too lazy for actually running all these tests manually for our research paper.
+Feel free to submit a PR to clean it up or actually make it usable for more than just our use case.
+
 ## CLI Flags
 
 Currently, the following CLI options are implemented:
