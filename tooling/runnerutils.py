@@ -36,3 +36,9 @@ class Stats:
 
     def __str__(self):
         return f"Stats type: {self.name}\nmedian: {self.median}\nmean: {self.mean}\nstandard deviation: {self.stdev}\nmin: {self.minimum}\nmax: {self.maximum}\n"
+
+def stats_from_file(path: str) -> Stats:
+    with open(path, 'r') as f:
+        lines = f.readlines()
+        lines = [l.split(":") for l in lines]
+        return Stats(float(lines[1][1].strip()), float(lines[2][1].strip()), float(lines[3][1].strip()), float(lines[4][1].strip()), float(lines[5][1].strip()), lines[0][1].strip())

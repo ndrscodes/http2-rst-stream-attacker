@@ -158,9 +158,21 @@ def stop_running_containers():
 def is_valid(path: str):
    return not os.path.exists(path + "/Latency.txt") 
 
+def find_best_option(server_name: str):
+    base = os.path.dirname(__file__) + "/" + server_name + "/"
+    scores = [(f, runnerutils.stats_from_file(base + "/" + f + "/Latency.txt")) for f in os.listdir(base)]
+
+    best = None
+    for s in scores:
+        if best is None or best[1].score() < s[1].score():
+            best = s
+    
+    for arg in args:
+        if arg[0] == best[0]:
+            return arg        
+
 stop_running_containers()
 
-arg_scores = []
 for server in servers:
     SERVER_TYPE, CONTAINER_ID = server
     subprocess.run(("docker", "start", CONTAINER_ID))
@@ -199,18 +211,15 @@ for server in servers:
 
         cooldown() 
     
-    best = None
-    for s in arg_scores:
-        if best is None or best[1] < s[1]:
-            best = s
+    best = find_best_option(SERVER_TYPE)
 
     print("best option:", best)
     
     for p in paths:
         print(f"measuring path {p}")
         name = best[0]
-        name = name + "_" + name
-        path = os.path.dirname(__file__) + "/" + SERVER_TYPE + "/" + a[0]
+        name = name + "_" + p[0]
+        path = os.path.dirname(__file__) + "/" + SERVER_TYPE + "/" + name
         if not is_valid(path):
             print(f"{path} already contains a complete measurement.")
             continue
@@ -223,4 +232,4 @@ for server in servers:
         cooldown()
 
     print("stopping container.")
-    subprocess.run("docker", "stop", CONTAINER_ID)
+    subprocess.run(("docker", "stop", CONTAINER_ID))
