@@ -147,8 +147,17 @@ def stats_to_str(stats: list[runnerutils.Stats]):
     stats = [s.__str__() for s in stats]
     return "\n".join(stats)
 
-arg_scores = []
+def stop_running_containers():
+    print("stopping ALL running docker containers...")
+    container_response = subprocess.run(("docker", "ps", "-q"), capture_output=True)
+    containers = container_response.stdout.splitlines()
+    print(f"found running docker containers: {containers}")
+    subprocess.run(("docker", "stop", *containers))
+    print("all containers stopped")
 
+stop_running_containers()
+
+arg_scores = []
 for server in servers:
     SERVER_TYPE, CONTAINER_ID = server
     subprocess.run(("docker", "start", CONTAINER_ID))
