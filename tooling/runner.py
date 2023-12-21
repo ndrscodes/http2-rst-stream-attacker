@@ -155,29 +155,41 @@ def stop_running_containers():
     subprocess.run(("docker", "stop", *containers))
     print("all containers stopped")
 
+def is_valid(path: str):
+   return not os.path.exists(path + "/Latency.txt") 
+
 stop_running_containers()
 
 arg_scores = []
 for server in servers:
     SERVER_TYPE, CONTAINER_ID = server
     subprocess.run(("docker", "start", CONTAINER_ID))
-    print("started container. Now cooling down for more accurate baseline measurement.")
-    cooldown()
+    print("started container.")
 
     path = os.path.dirname(__file__) + "/" + SERVER_TYPE + "/baseline"
-    os.makedirs(path)
+    should_measure_baseline = is_valid(path)    
 
-    with httpx.Client(http2=True, verify=False) as client:
-        url = args[0][1].url
-        print(f"now measuring baseline for url {url}")
-        stats = measure_baseline(client, url, path)
-        print(f"finished baseline measurement. Stats:\n{stats_to_str(stats)}")
+    if should_measure_baseline:
+        os.makedirs(path, exist_ok=True)
+        cooldown()
 
-    cooldown()
+        with httpx.Client(http2=True, verify=False) as client:
+            url = args[0][1].url
+            print(f"now measuring baseline for url {url}")
+            stats = measure_baseline(client, url, path)
+            print(f"finished baseline measurement. Stats:\n{stats_to_str(stats)}")
+
+        cooldown()
+    else:
+        print("baseline already contains a complete measurement. Skipping.")
 
     for a in args:
         print(f"collecting arg measurements. now trying args {a[0]}")
         path = os.path.dirname(__file__) + "/" + SERVER_TYPE + "/" + a[0]
+        if not is_valid(path):
+            print(f"{path} already contains a complete measurement.")
+            continue
+
         os.mkdir(path)
 
         with httpx.Client(http2=True, verify=False) as client:
@@ -199,6 +211,10 @@ for server in servers:
         name = best[0]
         name = name + "_" + name
         path = os.path.dirname(__file__) + "/" + SERVER_TYPE + "/" + a[0]
+        if not is_valid(path):
+            print(f"{path} already contains a complete measurement.")
+            continue
+
         os.makedirs(path)
         with httpx.Client(http2=True, verify=False) as client:
             stats = measure_attack(client, best, path)
