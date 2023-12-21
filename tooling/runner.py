@@ -162,7 +162,7 @@ for server in servers:
     SERVER_TYPE, CONTAINER_ID = server
     subprocess.run(("docker", "start", CONTAINER_ID))
     print("started container. Now cooling down for more accurate baseline measurement.")
-    cooldown(60)
+    cooldown()
 
     path = os.path.dirname(__file__) + "/" + SERVER_TYPE + "/baseline"
     os.makedirs(path)
