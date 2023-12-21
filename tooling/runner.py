@@ -97,9 +97,9 @@ def measure_baseline(client: httpx.Client, url: str, path: str):
         mem_data = mem_future.result()
 
         stats = [
-            create_stats(path, "cpu", cpu_data),
-            create_stats(path, "mem", mem_data),
-            create_stats(path, "latency", times),
+            create_stats(path, "CPU", cpu_data),
+            create_stats(path, "Memory", mem_data),
+            create_stats(path, "Latency", times),
         ]
 
         return stats
@@ -136,9 +136,9 @@ def measure_attack(client: httpx.Client, args: runnerutils.Params, path: str):
         mem_data = mem_future.result()
 
         stats = [
-            create_stats(path, "cpu", cpu_data),
-            create_stats(path, "mem", mem_data),
-            create_stats(path, "latency", times),
+            create_stats(path, "CPU", cpu_data),
+            create_stats(path, "Memory", mem_data),
+            create_stats(path, "Latency", times),
         ]
 
         return stats
