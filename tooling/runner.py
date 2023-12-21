@@ -190,7 +190,7 @@ for server in servers:
             print(f"{path} already contains a complete measurement.")
             continue
 
-        os.mkdir(path)
+        os.makedirs(path, exist_ok=True)
 
         with httpx.Client(http2=True, verify=False) as client:
             stats = measure_attack(client, a, path)
@@ -215,7 +215,7 @@ for server in servers:
             print(f"{path} already contains a complete measurement.")
             continue
 
-        os.makedirs(path)
+        os.makedirs(path, exist_ok=True)
         with httpx.Client(http2=True, verify=False) as client:
             stats = measure_attack(client, best, path)
             print(f"finished attack. Stats:\n{stats_to_str(stats)}")
