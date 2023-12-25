@@ -9,6 +9,7 @@ import os
 import concurrent.futures
 from config import *
 import runnerutils
+import copy
 
 pyplot.ioff()
 
@@ -106,7 +107,10 @@ def measure_baseline(client: httpx.Client, url: str, path: str):
 
 def cooldown(timeout: int=120):
     print(f"now cooling down for {timeout} seconds")
-    time.sleep(timeout)
+    try:
+        time.sleep(timeout)
+    except KeyboardInterrupt:
+        pass
 
 def measure_attack(client: httpx.Client, args: runnerutils.Params, path: str):
     times = []
@@ -159,14 +163,17 @@ def is_valid(path: str):
    return not os.path.exists(path + "/Latency.txt") 
 
 def find_best_option(server_name: str):
-    base = os.path.dirname(__file__) + "/" + server_name + "/"
+    base = os.path.dirname(__file__) + "/" + server_name
     scores = [(f, runnerutils.stats_from_file(base + "/" + f + "/Latency.txt")) for f in os.listdir(base)]
-
+    print("stats generated", scores)
     best = None
     for s in scores:
+        if s[0].startswith("FINAL"):
+            continue
         if best is None or best[1].score() < s[1].score():
             best = s
-    
+            
+    print("found best option type", best)
     for arg in args:
         if arg[0] == best[0]:
             return arg        
@@ -180,10 +187,10 @@ for server in servers:
 
     path = os.path.dirname(__file__) + "/" + SERVER_TYPE + "/baseline"
     should_measure_baseline = is_valid(path)    
+    cooldown()
 
     if should_measure_baseline:
         os.makedirs(path, exist_ok=True)
-        cooldown()
 
         with httpx.Client(http2=True, verify=False) as client:
             url = args[0][1].url
@@ -206,7 +213,6 @@ for server in servers:
 
         with httpx.Client(http2=True, verify=False) as client:
             stats = measure_attack(client, a, path)
-            arg_scores.append((a, stats[2].score()))
             print(f"finished attack. Stats:\n{stats_to_str(stats)}")
 
         cooldown() 
@@ -219,14 +225,16 @@ for server in servers:
         print(f"measuring path {p}")
         name = best[0]
         name = name + "_" + p[0]
-        path = os.path.dirname(__file__) + "/" + SERVER_TYPE + "/" + name
+        path = os.path.dirname(__file__) + "/" + SERVER_TYPE + "/FINAL_" + name
         if not is_valid(path):
             print(f"{path} already contains a complete measurement.")
             continue
 
         os.makedirs(path, exist_ok=True)
         with httpx.Client(http2=True, verify=False) as client:
-            stats = measure_attack(client, best, path)
+            params: Params = copy.copy(best[1])
+            params.path = "/" + p[1].strip("/")
+            stats = measure_attack(client, (best[0], params), path)
             print(f"finished attack. Stats:\n{stats_to_str(stats)}")
         
         cooldown()
