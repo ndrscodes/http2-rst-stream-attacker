@@ -16,8 +16,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/magisterquis/connectproxy"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/hpack"
+	"golang.org/x/net/proxy"
 )
 
 const PREFACE = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
@@ -94,6 +96,7 @@ var monitorLogPath = flag.String("monitorLog", "monitor.log", "path to performan
 var connectAttempts = flag.Uint("connectAttempts", 1, "number of consecutive connections to run the test on (per connect-routine)")
 var consecutiveSends = flag.Uint("consecutiveSends", 1, "number of HEADERS frames to send before sending RST_STREAM frames (per flow)")
 var timeout = flag.Uint("timeout", 1000, "time in ms to wait for more frames before terminating the connection")
+var proxyUrl = flag.String("proxy", "", "url of a proxy to use for making the requests")
 var connTotal uint;
 
 func createHeaderFrameParam(url *url.URL, streamId uint32) http2.HeadersFrameParam {
@@ -163,6 +166,7 @@ func monitorPerformance(ch chan <- time.Duration, doneFlag *bool) {
 }
 
 func main() {
+	connectproxy.RegisterDialerFromURL(true, true)
 	flag.Parse()
 	serverUrl, err := url.Parse(*serverUrl)
 	if err != nil {
@@ -264,9 +268,30 @@ func printResult(result ReadFrameResult) {
 }
 
 func connectAndAttack(serverUrl *url.URL, conf *tls.Config, connId uint) ReadFrameResult {
-	conn, err := tls.Dial("tcp", serverUrl.Host, conf)
-	if err != nil {
-		log.Fatalf("error establishing connection to %s: %v", serverUrl.Host, err)
+	var conn *tls.Conn
+	if *proxyUrl != "" {
+		purl, err := url.Parse(*proxyUrl)
+		if err != nil {
+			log.Fatalf("error parsing proxy url: %v", err)
+		}
+
+		prox, err := proxy.FromURL(purl, proxy.Direct)
+		if err != nil {
+			log.Fatalf("error creating proxy dialer: %v", err)
+		}
+	
+		proxied, err := prox.Dial("tcp", serverUrl.Host)
+		if err != nil {
+			log.Fatalf("unable to establish proxy connection: %v", err)
+		}
+
+		conn = tls.Client(proxied, conf)
+	} else {
+		var err error;
+		conn, err = tls.Dial("tcp", serverUrl.Host, conf)
+		if err != nil {
+			log.Fatalf("error dialing to %s: %v", serverUrl.Host, err)
+		}
 	}
 
 	prefaceBytes := []byte(PREFACE)
