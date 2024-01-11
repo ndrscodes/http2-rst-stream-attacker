@@ -168,11 +168,11 @@ def find_best_option(server_name: str):
     print("stats generated", scores)
     best = None
     for s in scores:
-        if s[0].startswith("FINAL"):
+        if s[0].startswith("FINAL") or s[1] is None:
             continue
         if best is None or best[1].score() < s[1].score():
             best = s
-            
+
     print("found best option type", best)
     for arg in args:
         if arg[0] == best[0]:
